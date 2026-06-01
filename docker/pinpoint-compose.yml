@@ -1,0 +1,300 @@
+name: pinpoint
+
+# ============================================================
+# Pinpoint APM 백엔드 스택 — 3.1.0 고정
+#
+# ⚠ RAM 경고: HBase + Zookeeper + Collector + Web 합산 6–8 GB 이상 권장.
+#   Docker Desktop → Settings → Resources 에서 메모리 할당을 확인할 것.
+#   최초 기동 시 HBase 스키마 초기화에 1–2분 소요됨 — 그 전에 Web UI 에
+#   접속하면 "Cannot connect to HBase" 오류가 표시되므로 로그 확인 후 접속.
+#
+# 사용법:
+#   docker compose -f docker/pinpoint-compose.yml up -d
+#
+# Pinpoint Web UI: http://localhost:8088
+#   (포트 8080은 lab-redis 앱이 사용하므로 8088로 리맵)
+#
+# 에이전트 연결은 다음 단계(앱 페이즈)에서 진행.
+# 미리 트레이스 동작을 확인하려면 파일 하단 pinpoint-quickstart 주석 해제.
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────
+  # Zookeeper 3-node ensemble — 공식 compose 와 동일
+  # HBase 이미지가 내부적으로 zoo1 호스트명을 하드코딩하므로
+  # 단일 노드로 통합하면 "zoo1: Name or service not known" 오류 발생.
+  # ──────────────────────────────────────────────
+  zoo1:
+    image: zookeeper:3.4.13
+    container_name: zoo1
+    restart: always
+    hostname: zoo1
+    expose:
+      - "2181"
+      - "2888"
+      - "3888"
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=0.0.0.0:2888:3888 server.2=zoo2:2888:3888 server.3=zoo3:2888:3888
+    networks:
+      - pinpoint-net
+
+  zoo2:
+    image: zookeeper:3.4.13
+    container_name: zoo2
+    restart: always
+    hostname: zoo2
+    expose:
+      - "2181"
+      - "2888"
+      - "3888"
+    environment:
+      ZOO_MY_ID: 2
+      ZOO_SERVERS: server.1=zoo1:2888:3888 server.2=0.0.0.0:2888:3888 server.3=zoo3:2888:3888
+    networks:
+      - pinpoint-net
+
+  zoo3:
+    image: zookeeper:3.4.13
+    container_name: zoo3
+    restart: always
+    hostname: zoo3
+    expose:
+      - "2181"
+      - "2888"
+      - "3888"
+    environment:
+      ZOO_MY_ID: 3
+      ZOO_SERVERS: server.1=zoo1:2888:3888 server.2=zoo2:2888:3888 server.3=0.0.0.0:2888:3888
+    networks:
+      - pinpoint-net
+
+  # ──────────────────────────────────────────────
+  # HBase — Pinpoint 저장소
+  # 스키마 초기화 포함. 최초 기동 시 1–2분 소요.
+  # ──────────────────────────────────────────────
+  pinpoint-hbase:
+    image: pinpointdocker/pinpoint-hbase:3.1.0
+    container_name: pinpoint-hbase
+    restart: always
+    depends_on:
+      - zoo1
+    environment:
+      # HBase 테이블별 TTL (초 단위)
+      - AGENTINFO_TTL=31536000
+      - AGENTSTATV2_TTL=5184000
+      - APPSTATAGGRE_TTL=5184000
+      - APPINDEX_TTL=31536000
+      - AGENTLIFECYCLE_TTL=5184000
+      - AGENTEVENT_TTL=5184000
+      - STRINGMETADATA_TTL=15552000
+      - APIMETADATA_TTL=31536000
+      - SQLMETADATA_TTL=15552000
+      - TRACEV2_TTL=5184000
+      - APPTRACEINDEX_TTL=5184000
+      - APPMAPSTATCALLERV2_TTL=5184000
+      - APPMAPSTATCALLEV2_TTL=5184000
+      - APPMAPSTATSELFV2_TTL=5184000
+      - HOSTAPPMAPV2_TTL=5184000
+    volumes:
+      - hbase_data:/home/pinpoint/hbase
+      - hbase_zk_data:/home/pinpoint/zookeeper
+    expose:
+      - "60000"
+      - "16010"
+      - "60020"
+      - "16030"
+    ports:
+      - "60000:60000"
+      - "16010:16010"
+      - "60020:60020"
+      - "16030:16030"
+    networks:
+      - pinpoint-net
+
+  # ──────────────────────────────────────────────
+  # Redis — Collector/Web 실시간 데이터 및 인벤토리 캐시
+  # 공식 compose 와 동일하게 redis:7.0.14 사용.
+  # ★ 호스트 포트 미노출: lab 스택의 redis-compose.yml 이 6379 를 이미 점유.
+  #   Pinpoint 내부(pinpoint-net)에서만 접근하면 충분하므로 expose 만 선언.
+  # ──────────────────────────────────────────────
+  pinpoint-redis:
+    image: redis:7.0.14
+    container_name: pinpoint-redis
+    restart: always
+    hostname: pinpoint-redis
+    expose:
+      - "6379"
+    networks:
+      - pinpoint-net
+
+  # ──────────────────────────────────────────────
+  # MySQL — Pinpoint Web 설정/메타데이터 데이터소스
+  # 공식 compose(mysql:8.0) 와 동일한 이미지 사용.
+  # 초기화 SQL 은 공식 compose 의 entrypoint 스크립트와 동일하게 GitHub 에서 다운로드.
+  # ★ 호스트 포트: 3306 은 충돌 목록에 없으나 호스트 MySQL 과의 잠재적 충돌을
+  #   피하기 위해 expose 만 선언 (pinpoint-web/batch 는 내부 네트워크에서만 접근).
+  # ──────────────────────────────────────────────
+  pinpoint-mysql:
+    image: mysql:8.0
+    container_name: pinpoint-mysql
+    restart: always
+    hostname: pinpoint-mysql
+    entrypoint: >
+      sh -c "
+      curl -SL 'https://raw.githubusercontent.com/pinpoint-apm/pinpoint/v3.1.0/web/src/main/resources/sql/CreateTableStatement-mysql.sql' -o /docker-entrypoint-initdb.d/CreateTableStatement-mysql.sql &&
+      curl -SL 'https://raw.githubusercontent.com/pinpoint-apm/pinpoint/v3.1.0/web/src/main/resources/sql/SpringBatchJobRepositorySchema-mysql.sql' -o /docker-entrypoint-initdb.d/SpringBatchJobRepositorySchema-mysql.sql &&
+      sed -i '/^--/d' /docker-entrypoint-initdb.d/CreateTableStatement-mysql.sql &&
+      sed -i '/^--/d' /docker-entrypoint-initdb.d/SpringBatchJobRepositorySchema-mysql.sql &&
+      docker-entrypoint.sh mysqld
+      "
+    expose:
+      - "3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_USER=admin
+      - MYSQL_PASSWORD=admin
+      - MYSQL_DATABASE=pinpoint
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - pinpoint-net
+
+  # ──────────────────────────────────────────────
+  # Collector — 에이전트에서 트레이스/통계 수신
+  # gRPC 포트 9991-9993, Thrift 9994, UDP 9995-9996
+  # ──────────────────────────────────────────────
+  pinpoint-collector:
+    image: pinpointdocker/pinpoint-collector:3.1.0
+    container_name: pinpoint-collector
+    restart: always
+    depends_on:
+      - pinpoint-hbase
+      - zoo1
+      - pinpoint-redis
+    expose:
+      - "9991"
+      - "9992"
+      - "9993"
+      - "9994"
+      - "9995"
+      - "9996"
+    ports:
+      # gRPC 에이전트 포트 (에이전트 → Collector)
+      - "9991:9991/tcp"
+      - "9992:9992/tcp"
+      - "9993:9993/tcp"
+      # Thrift 기본 포트
+      - "9994:9994"
+      # UDP stat/span 포트 (레거시 Thrift)
+      - "9995:9995/tcp"
+      - "9995:9995/udp"
+      - "9996:9996/tcp"
+      - "9996:9996/udp"
+    environment:
+      - SPRING_PROFILES_ACTIVE=release
+      - PINPOINT_ZOOKEEPER_ADDRESS=zoo1,zoo2,zoo3
+      - CLUSTER_ENABLE=true
+      - LOGGING_LEVEL_ROOT=INFO
+      # Flink 미사용 (metric 스택 스킵)
+      - FLINK_CLUSTER_ENABLE=false
+      - FLINK_CLUSTER_ZOOKEEPER_ADDRESS=zoo1,zoo2,zoo3
+      # Redis — 실시간/인벤토리 데이터 (공식 .env 값 그대로)
+      - SPRING_DATA_REDIS_HOST=pinpoint-redis
+      - SPRING_DATA_REDIS_PORT=6379
+      - SPRING_DATA_REDIS_USERNAME=default
+      - SPRING_DATA_REDIS_PASSWORD=
+    networks:
+      pinpoint-net:
+        ipv4_address: 172.24.0.30
+
+  # ──────────────────────────────────────────────
+  # Web UI — http://localhost:8088
+  # 8080은 lab-redis 앱과 충돌하므로 호스트 포트 8088 로 리맵
+  # MySQL: 설정/메타데이터 데이터소스 (알람·배치 활성화)
+  # ──────────────────────────────────────────────
+  pinpoint-web:
+    image: pinpointdocker/pinpoint-web:3.1.0
+    container_name: pinpoint-web
+    restart: always
+    depends_on:
+      - pinpoint-hbase
+      - zoo1
+      - pinpoint-mysql
+      - pinpoint-redis
+    expose:
+      - "9997"
+    ports:
+      # ★ 8080 → 8088 로 리맵 (lab-redis 앱 포트와 충돌 방지)
+      - "8088:8080"
+      - "9997:9997"
+    environment:
+      - WEB_SERVER_PORT=8080
+      - SPRING_PROFILES_ACTIVE=release
+      - PINPOINT_ZOOKEEPER_ADDRESS=zoo1,zoo2,zoo3
+      - CLUSTER_ENABLE=true
+      - ADMIN_PASSWORD=admin
+      - CONFIG_SENDUSAGE=false
+      - LOGGING_LEVEL_ROOT=INFO
+      - CONFIG_SHOW_APPLICATIONSTAT=true
+      # MySQL 데이터소스 (공식 .env 값 그대로)
+      - JDBC_DRIVERCLASSNAME=com.mysql.jdbc.Driver
+      - JDBC_URL=jdbc:mysql://pinpoint-mysql:3306/pinpoint?characterEncoding=UTF-8
+      - JDBC_USERNAME=admin
+      - JDBC_PASSWORD=admin
+      - SPRING_DATASOURCE_HIKARI_JDBCURL=jdbc:mysql://pinpoint-mysql:3306/pinpoint?characterEncoding=UTF-8
+      - SPRING_DATASOURCE_HIKARI_USERNAME=admin
+      - SPRING_DATASOURCE_HIKARI_PASSWORD=admin
+      - SPRING_METADATASOURCE_HIKARI_JDBCURL=jdbc:mysql://pinpoint-mysql:3306/pinpoint?characterEncoding=UTF-8
+      - SPRING_METADATASOURCE_HIKARI_USERNAME=admin
+      - SPRING_METADATASOURCE_HIKARI_PASSWORD=admin
+      # Redis — 실시간/인벤토리 데이터 (공식 .env 값 그대로)
+      - SPRING_DATA_REDIS_HOST=pinpoint-redis
+      - SPRING_DATA_REDIS_PORT=6379
+      - SPRING_DATA_REDIS_USERNAME=default
+      - SPRING_DATA_REDIS_PASSWORD=
+      - PINPOINT_MODULES_WEB_LOGIN=false
+    networks:
+      - pinpoint-net
+
+  # ──────────────────────────────────────────────
+  # [선택사항] Quickstart 샘플 앱 (기본 주석 처리)
+  # 에이전트가 붙은 트레이스가 Web UI 에 표시되는지 미리 확인할 때 사용.
+  # lab-redis 앱 연결 전 동작 검증용으로만 사용하고, 이후 다시 주석 처리.
+  #
+  # 사용법: 아래 주석 해제 후 `docker compose ... up -d pinpoint-quickstart`
+  # ──────────────────────────────────────────────
+  # pinpoint-quickstart:
+  #   image: pinpointdocker/pinpoint-quickstart
+  #   container_name: pinpoint-quickstart
+  #   ports:
+  #     - "8085:8080"
+  #   environment:
+  #     JAVA_OPTS: >-
+  #       -javaagent:/pinpoint-agent/pinpoint-bootstrap.jar
+  #       -Dpinpoint.agentId=quickstart
+  #       -Dpinpoint.applicationName=quickstart
+  #       -Dpinpoint.profiler.profiles.active=release
+  #   depends_on:
+  #     - pinpoint-collector
+  #   networks:
+  #     - pinpoint-net
+
+networks:
+  pinpoint-net:
+    name: pinpoint-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.24.0.0/27
+
+volumes:
+  hbase_data:
+    name: pinpoint-hbase-data
+  hbase_zk_data:
+    name: pinpoint-hbase-zk-data
+  mysql_data:
+    name: pinpoint-mysql-data
