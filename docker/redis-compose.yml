@@ -1,0 +1,33 @@
+name: lab-redis
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: lab-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - lab-redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: lab-redis-exporter
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    ports:
+      - "9121:9121"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - lab-redis-net
+
+networks:
+  lab-redis-net:
+    name: lab-redis-net
+    driver: bridge

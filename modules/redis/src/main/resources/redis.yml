@@ -1,0 +1,26 @@
+# Redis 연결 설정 — modules/redis 모듈이 클래스패스에 제공하는 설정 파일
+# 앱의 application.yml 에서 spring.config.import: [classpath:redis.yml] 로 임포트된다.
+
+spring:
+  data:
+    redis:
+      # 기본값: localhost:6379 (로컬 개발 환경)
+      # 환경변수 REDIS_HOST / REDIS_PORT 로 오버라이드 가능
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      repositories:
+        # Spring Data Redis 의 자동 Repository 스캔 비활성화
+        # 이 모듈은 RedisConfig + StringRedisTemplate 만 제공하므로 불필요
+        enabled: false
+
+---
+# 로컬 개발 환경 프로필 설정
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}

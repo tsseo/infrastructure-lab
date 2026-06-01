@@ -1,0 +1,23 @@
+# Actuator + Prometheus 모니터링 설정 — supports/monitoring 모듈이 클래스패스에 제공
+# 앱의 application.yml 에서 spring.config.import: [classpath:monitoring.yml] 로 임포트된다.
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 외부에 노출할 Actuator 엔드포인트 목록
+        # health: 헬스 체크 (/actuator/health)
+        # info: 앱 정보 (/actuator/info)
+        # prometheus: Micrometer Prometheus 메트릭 (/actuator/prometheus)
+        include: health,info,prometheus
+  metrics:
+    tags:
+      # 모든 메트릭에 application 태그를 붙여 Prometheus/Grafana 에서 앱별 필터링 가능
+      application: ${spring.application.name}
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      access: read_only
+  # 관리 포트 분리 없음 — 메인 앱 포트(8080)에서 /actuator/* 를 함께 서빙
+  # (참고 프로젝트의 management.server.port: 8081 은 의도적으로 생략)

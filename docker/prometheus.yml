@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # lab-redis Spring Boot Actuator 메트릭
+  # apps/lab-redis 앱이 8080 포트에서 /actuator/prometheus 를 노출
+  - job_name: lab-redis-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - host.docker.internal:8080
+        labels:
+          application: lab-redis
+
+  # Redis 노드 메트릭 (redis_exporter 경유)
+  # docker/redis-compose.yml 의 redis-exporter 컨테이너가 9121 포트에서 메트릭 노출
+  - job_name: redis-exporter
+    static_configs:
+      - targets:
+          - host.docker.internal:9121
+        labels:
+          instance: local-redis
+
+  # k6 Prometheus remote-write receiver (선택 사항)
+  # k6 를 -o experimental-prometheus-rw 옵션으로 실행하면 메트릭이 push 됨
+  # remote_write receiver 는 --web.enable-remote-write-receiver 로 이미 활성화됨

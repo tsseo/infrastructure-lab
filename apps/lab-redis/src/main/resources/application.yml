@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: lab-redis
+  profiles:
+    active: local
+  config:
+    # 각 모듈의 yml 파일을 임포트하여 설정을 합성한다.
+    # modules/redis 는 redis.yml, supports/monitoring 은 monitoring.yml 을 클래스패스에 제공
+    import:
+      - classpath:redis.yml
+      - classpath:monitoring.yml
+
+server:
+  port: 8080
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prd
