@@ -1,0 +1,139 @@
+name: redis-cluster
+
+networks:
+  redis-cluster-net:
+    name: redis-cluster-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+services:
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: redis-node-1
+    ports:
+      - "7001:6379"
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.30.0.11
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly no
+      --cluster-announce-ip 172.30.0.11
+      --port 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: redis-node-2
+    ports:
+      - "7002:6379"
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.30.0.12
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly no
+      --cluster-announce-ip 172.30.0.12
+      --port 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: redis-node-3
+    ports:
+      - "7003:6379"
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.30.0.13
+    command: >
+      redis-server
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --appendonly no
+      --cluster-announce-ip 172.30.0.13
+      --port 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: redis-cluster-init
+    networks:
+      - redis-cluster-net
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for Redis nodes to be ready...' &&
+        until redis-cli -h 172.30.0.11 -p 6379 ping | grep -q PONG; do echo 'Waiting for node-1...'; sleep 1; done &&
+        until redis-cli -h 172.30.0.12 -p 6379 ping | grep -q PONG; do echo 'Waiting for node-2...'; sleep 1; done &&
+        until redis-cli -h 172.30.0.13 -p 6379 ping | grep -q PONG; do echo 'Waiting for node-3...'; sleep 1; done &&
+        echo 'All nodes ready. Creating cluster...' &&
+        redis-cli --cluster create 172.30.0.11:6379 172.30.0.12:6379 172.30.0.13:6379 --cluster-replicas 0 --cluster-yes &&
+        echo 'Cluster created successfully!'
+      "
+    restart: "no"
+
+  redis-exporter-1:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter-1
+    environment:
+      REDIS_ADDR: "redis://172.30.0.11:6379"
+    ports:
+      - "9131:9121"
+    networks:
+      - redis-cluster-net
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+
+  redis-exporter-2:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter-2
+    environment:
+      REDIS_ADDR: "redis://172.30.0.12:6379"
+    ports:
+      - "9132:9121"
+    networks:
+      - redis-cluster-net
+    depends_on:
+      redis-node-2:
+        condition: service_healthy
+
+  redis-exporter-3:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter-3
+    environment:
+      REDIS_ADDR: "redis://172.30.0.13:6379"
+    ports:
+      - "9133:9121"
+    networks:
+      - redis-cluster-net
+    depends_on:
+      redis-node-3:
+        condition: service_healthy

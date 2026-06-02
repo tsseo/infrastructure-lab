@@ -43,3 +43,9 @@ bin/
 ### Claude Code ###
 .claude/
 CLAUDE.local.md
+
+### Pinpoint agent (downloaded build artifact) ###
+docker/pinpoint/pinpoint-agent/
+
+### Runtime logs ###
+*.log

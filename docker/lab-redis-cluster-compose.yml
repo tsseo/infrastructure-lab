@@ -1,0 +1,30 @@
+name: lab-redis-cluster-app
+
+networks:
+  redis-cluster-net:
+    external: true
+
+services:
+  lab-redis-cluster:
+    build:
+      context: ..
+      dockerfile: apps/lab-redis/Dockerfile
+    container_name: lab-redis-cluster-app
+    ports:
+      - "8080:8080"
+    cpus: "4"
+    mem_limit: 2g
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - redis-cluster-net
+    environment:
+      SPRING_PROFILES_ACTIVE: cluster
+      SPRING_DATA_REDIS_CLUSTER_NODES: 172.30.0.11:6379,172.30.0.12:6379,172.30.0.13:6379
+      REDIS_COMMAND_TIMEOUT: 250ms
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s

@@ -12,6 +12,11 @@ spring:
         # Spring Data Redis 의 자동 Repository 스캔 비활성화
         # 이 모듈은 RedisConfig + StringRedisTemplate 만 제공하므로 불필요
         enabled: false
+      # Lettuce 커맨드 타임아웃 — 기본 250ms (타임아웃 실험을 위해 의도적으로 짧게 설정)
+      # Redis 자체는 빠르지만 앱/JVM CPU 포화 시 이 시간 내에 응답 처리를 못해
+      # 타임아웃이 발생하는 시나리오를 재현한다.
+      # 환경변수 REDIS_COMMAND_TIMEOUT 으로 조정 가능 (예: 500ms, 1s)
+      timeout: ${REDIS_COMMAND_TIMEOUT:250ms}
 
 ---
 # 로컬 개발 환경 프로필 설정
@@ -24,3 +29,20 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+
+---
+# Redis Cluster 프로필 설정
+# SPRING_DATA_REDIS_CLUSTER_NODES 환경변수로 클러스터 노드 목록을 주입한다.
+# 예: SPRING_DATA_REDIS_CLUSTER_NODES=172.30.0.11:6379,172.30.0.12:6379,172.30.0.13:6379
+# 이 프로필이 활성화되면 Standalone host/port 설정은 무시되고 클러스터 모드로 동작한다.
+spring:
+  config:
+    activate:
+      on-profile: cluster
+
+  data:
+    redis:
+      cluster:
+        nodes: ${SPRING_DATA_REDIS_CLUSTER_NODES}
+        max-redirects: 3
+      timeout: ${REDIS_COMMAND_TIMEOUT:250ms}

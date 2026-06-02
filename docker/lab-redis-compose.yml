@@ -1,0 +1,24 @@
+name: lab-redis-app
+
+services:
+  lab-redis:
+    build:
+      context: ..
+      dockerfile: apps/lab-redis/Dockerfile
+    container_name: lab-redis-app
+    ports:
+      - "8080:8080"
+    cpus: "2"
+    mem_limit: 2g
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      REDIS_HOST: host.docker.internal
+      REDIS_PORT: "6379"
+      REDIS_COMMAND_TIMEOUT: 2s
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s

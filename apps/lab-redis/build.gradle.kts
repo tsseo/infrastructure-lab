@@ -8,4 +8,10 @@ dependencies {
 
     // ─── 웹 레이어 ─────────────────────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-web")
+
+    // ─── L1 로컬 캐시 (Caffeine) ───────────────────────────────────────────────
+    // Spring Boot BOM 이 버전을 관리하므로 버전을 명시하지 않는다.
+    // spring-boot-starter-cache 를 사용하지 않고 Caffeine 라이브러리만 직접 주입한다.
+    // 이렇게 하면 CacheManager 자동 설정 없이 포트 + 어댑터로 캐시를 완전히 직접 관리할 수 있다.
+    implementation("com.github.ben-manes.caffeine:caffeine")
 }
